@@ -1,0 +1,435 @@
+/* Gramática Compiscript procesada por el generador SLR(1) YAPar propio. */
+
+%token LET VAR CONST FUNCTION CLASS NEW THIS IF ELSE WHILE DO FOR FOREACH IN
+%token SWITCH CASE DEFAULT TRY CATCH RETURN BREAK CONTINUE PRINT NULL TRUE FALSE
+%token TBOOLEAN TINTEGER TFLOAT TSTRING ID INTEGER_LITERAL FLOAT_LITERAL STRING_LITERAL
+%token EQ NE LE GE LT GT AND OR ASSIGN PLUS MINUS STAR SLASH MOD NOT QUESTION COLON DOT
+%token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COMMA SEMI
+
+%%
+
+program:
+    statement_list
+;
+
+statement_list:
+    statement_list statement
+    |
+;
+
+statement:
+    variable_declaration
+    | constant_declaration
+    | function_declaration
+    | class_declaration
+    | print_statement
+    | block
+    | if_statement
+    | while_statement
+    | do_while_statement
+    | for_statement
+    | foreach_statement
+    | try_catch_statement
+    | switch_statement
+    | break_statement
+    | continue_statement
+    | return_statement
+    | expression_statement
+;
+
+block:
+    LBRACE statement_list RBRACE
+;
+
+var_keyword:
+    LET
+    | VAR
+;
+
+variable_declaration:
+    var_keyword ID optional_type optional_initializer SEMI
+;
+
+variable_declaration_no_semi:
+    var_keyword ID optional_type optional_initializer
+;
+
+constant_declaration:
+    CONST ID optional_type optional_initializer SEMI
+;
+
+optional_type:
+    type_annotation
+    |
+;
+
+type_annotation:
+    COLON type
+;
+
+optional_initializer:
+    initializer
+    |
+;
+
+initializer:
+    ASSIGN expression
+;
+
+expression_statement:
+    expression SEMI
+;
+
+print_statement:
+    PRINT LPAREN expression RPAREN SEMI
+;
+
+if_statement:
+    IF LPAREN expression RPAREN block optional_else
+;
+
+optional_else:
+    ELSE block
+    |
+;
+
+while_statement:
+    WHILE LPAREN expression RPAREN block
+;
+
+do_while_statement:
+    DO block WHILE LPAREN expression RPAREN SEMI
+;
+
+for_statement:
+    FOR LPAREN optional_for_initializer SEMI optional_for_condition SEMI optional_for_update RPAREN block
+;
+
+optional_for_initializer:
+    for_initializer
+    |
+;
+
+for_initializer:
+    variable_declaration_no_semi
+    | expression
+;
+
+optional_for_condition:
+    expression
+    |
+;
+
+optional_for_update:
+    expression
+    |
+;
+
+foreach_statement:
+    FOREACH LPAREN ID IN expression RPAREN block
+;
+
+break_statement:
+    BREAK SEMI
+;
+
+continue_statement:
+    CONTINUE SEMI
+;
+
+return_statement:
+    RETURN optional_return_expression SEMI
+;
+
+optional_return_expression:
+    expression
+    |
+;
+
+try_catch_statement:
+    TRY block CATCH LPAREN ID RPAREN block
+;
+
+switch_statement:
+    SWITCH LPAREN expression RPAREN LBRACE switch_case_list optional_default RBRACE
+;
+
+switch_case_list:
+    switch_case_list switch_case
+    |
+;
+
+switch_case:
+    CASE expression COLON statement_list
+;
+
+optional_default:
+    default_case
+    |
+;
+
+default_case:
+    DEFAULT COLON statement_list
+;
+
+function_declaration:
+    FUNCTION ID LPAREN optional_parameters RPAREN optional_return_type block
+;
+
+optional_parameters:
+    parameters
+    |
+;
+
+parameters:
+    parameter_list
+;
+
+parameter_list:
+    parameter_list COMMA parameter
+    | parameter
+;
+
+parameter:
+    ID optional_type
+;
+
+optional_return_type:
+    COLON type
+    |
+;
+
+class_declaration:
+    CLASS ID optional_parent LBRACE class_member_list RBRACE
+;
+
+optional_parent:
+    COLON ID
+    |
+;
+
+class_member_list:
+    class_member_list class_member
+    |
+;
+
+class_member:
+    function_declaration
+    | variable_declaration
+    | constant_declaration
+;
+
+expression:
+    assignment_expr
+;
+
+assignment_expr:
+    conditional_expr ASSIGN assignment_expr
+    | conditional_expr
+;
+
+conditional_expr:
+    logical_or_expr conditional_tail
+;
+
+conditional_tail:
+    QUESTION expression COLON expression
+    |
+;
+
+logical_or_expr:
+    logical_or_expr OR logical_and_expr
+    | logical_and_expr
+;
+
+logical_and_expr:
+    logical_and_expr AND equality_expr
+    | equality_expr
+;
+
+equality_expr:
+    equality_expr EQ relational_expr
+    | equality_expr NE relational_expr
+    | relational_expr
+;
+
+relational_expr:
+    relational_expr LT additive_expr
+    | relational_expr LE additive_expr
+    | relational_expr GT additive_expr
+    | relational_expr GE additive_expr
+    | additive_expr
+;
+
+additive_expr:
+    additive_expr PLUS multiplicative_expr
+    | additive_expr MINUS multiplicative_expr
+    | multiplicative_expr
+;
+
+multiplicative_expr:
+    multiplicative_expr STAR unary_expr
+    | multiplicative_expr SLASH unary_expr
+    | multiplicative_expr MOD unary_expr
+    | unary_expr
+;
+
+unary_expr:
+    NOT unary_expr
+    | MINUS unary_expr
+    | primary_expr
+;
+
+primary_expr:
+    literal_expr
+    | left_hand_side
+    | LPAREN expression RPAREN
+;
+
+literal_expr:
+    integer_literal
+    | float_literal
+    | string_literal
+    | null_literal
+    | true_literal
+    | false_literal
+    | array_literal
+;
+
+integer_literal:
+    INTEGER_LITERAL
+;
+
+float_literal:
+    FLOAT_LITERAL
+;
+
+string_literal:
+    STRING_LITERAL
+;
+
+null_literal:
+    NULL
+;
+
+true_literal:
+    TRUE
+;
+
+false_literal:
+    FALSE
+;
+
+array_literal:
+    LBRACKET optional_array_items RBRACKET
+;
+
+optional_array_items:
+    array_items
+    |
+;
+
+array_items:
+    array_items COMMA expression
+    | expression
+;
+
+left_hand_side:
+    primary_atom suffix_list
+;
+
+primary_atom:
+    identifier_expr
+    | new_expr
+    | this_expr
+;
+
+identifier_expr:
+    ID
+;
+
+new_expr:
+    NEW ID LPAREN optional_arguments RPAREN
+;
+
+this_expr:
+    THIS
+;
+
+suffix_list:
+    suffix_list suffix_op
+    |
+;
+
+suffix_op:
+    call_suffix
+    | index_suffix
+    | property_suffix
+;
+
+call_suffix:
+    LPAREN optional_arguments RPAREN
+;
+
+index_suffix:
+    LBRACKET expression RBRACKET
+;
+
+property_suffix:
+    DOT ID
+;
+
+optional_arguments:
+    arguments
+    |
+;
+
+arguments:
+    argument_list
+;
+
+argument_list:
+    argument_list COMMA expression
+    | expression
+;
+
+type:
+    base_type array_suffix_list
+;
+
+base_type:
+    boolean_type
+    | integer_type
+    | float_type
+    | string_type
+    | named_type
+;
+
+boolean_type:
+    TBOOLEAN
+;
+
+integer_type:
+    TINTEGER
+;
+
+float_type:
+    TFLOAT
+;
+
+string_type:
+    TSTRING
+;
+
+named_type:
+    ID
+;
+
+array_suffix_list:
+    array_suffix_list array_suffix
+    |
+;
+
+array_suffix:
+    LBRACKET RBRACKET
+;

@@ -1,0 +1,74 @@
+(* Especificación léxica de Compiscript para el generador YALex propio. *)
+
+{
+from tok import Token
+}
+
+let DIGIT  = [0-9]
+let LETTER = [a-zA-Z_]
+let ALNUM  = [a-zA-Z0-9_]
+
+rule gettoken =
+  [ \t\r\n]+          { return None }
+| "//"[^\n]*          { return None }
+| "/*"([^*] | "*"+[^*/])*"*"+"/" { return None }
+| "let"               { return Token('LET', lxm, line, col) }
+| "var"               { return Token('VAR', lxm, line, col) }
+| "const"             { return Token('CONST', lxm, line, col) }
+| "function"          { return Token('FUNCTION', lxm, line, col) }
+| "class"             { return Token('CLASS', lxm, line, col) }
+| "new"               { return Token('NEW', lxm, line, col) }
+| "this"              { return Token('THIS', lxm, line, col) }
+| "if"                { return Token('IF', lxm, line, col) }
+| "else"              { return Token('ELSE', lxm, line, col) }
+| "while"             { return Token('WHILE', lxm, line, col) }
+| "do"                { return Token('DO', lxm, line, col) }
+| "for"               { return Token('FOR', lxm, line, col) }
+| "foreach"           { return Token('FOREACH', lxm, line, col) }
+| "in"                { return Token('IN', lxm, line, col) }
+| "switch"            { return Token('SWITCH', lxm, line, col) }
+| "case"              { return Token('CASE', lxm, line, col) }
+| "default"           { return Token('DEFAULT', lxm, line, col) }
+| "try"               { return Token('TRY', lxm, line, col) }
+| "catch"             { return Token('CATCH', lxm, line, col) }
+| "return"            { return Token('RETURN', lxm, line, col) }
+| "break"             { return Token('BREAK', lxm, line, col) }
+| "continue"          { return Token('CONTINUE', lxm, line, col) }
+| "print"             { return Token('PRINT', lxm, line, col) }
+| "null"              { return Token('NULL', lxm, line, col) }
+| "true"              { return Token('TRUE', lxm, line, col) }
+| "false"             { return Token('FALSE', lxm, line, col) }
+| "boolean"           { return Token('TBOOLEAN', lxm, line, col) }
+| "integer"           { return Token('TINTEGER', lxm, line, col) }
+| "float"             { return Token('TFLOAT', lxm, line, col) }
+| "string"            { return Token('TSTRING', lxm, line, col) }
+| {DIGIT}+"."{DIGIT}+ { return Token('FLOAT_LITERAL', lxm, line, col) }
+| {DIGIT}+             { return Token('INTEGER_LITERAL', lxm, line, col) }
+| '"'[^"\r\n]*'"'   { return Token('STRING_LITERAL', lxm, line, col) }
+| {LETTER}{ALNUM}*     { return Token('ID', lxm, line, col) }
+| "=="                { return Token('EQ', lxm, line, col) }
+| "!="                { return Token('NE', lxm, line, col) }
+| "<="                { return Token('LE', lxm, line, col) }
+| ">="                { return Token('GE', lxm, line, col) }
+| "&&"                { return Token('AND', lxm, line, col) }
+| "||"                { return Token('OR', lxm, line, col) }
+| "<"                 { return Token('LT', lxm, line, col) }
+| ">"                 { return Token('GT', lxm, line, col) }
+| "!"                 { return Token('NOT', lxm, line, col) }
+| "="                 { return Token('ASSIGN', lxm, line, col) }
+| "+"                 { return Token('PLUS', lxm, line, col) }
+| "-"                 { return Token('MINUS', lxm, line, col) }
+| "*"                 { return Token('STAR', lxm, line, col) }
+| "/"                 { return Token('SLASH', lxm, line, col) }
+| "%"                 { return Token('MOD', lxm, line, col) }
+| "?"                 { return Token('QUESTION', lxm, line, col) }
+| ":"                 { return Token('COLON', lxm, line, col) }
+| "."                 { return Token('DOT', lxm, line, col) }
+| "("                 { return Token('LPAREN', lxm, line, col) }
+| ")"                 { return Token('RPAREN', lxm, line, col) }
+| "{"                 { return Token('LBRACE', lxm, line, col) }
+| "}"                 { return Token('RBRACE', lxm, line, col) }
+| "["                 { return Token('LBRACKET', lxm, line, col) }
+| "]"                 { return Token('RBRACKET', lxm, line, col) }
+| ","                 { return Token('COMMA', lxm, line, col) }
+| ";"                 { return Token('SEMI', lxm, line, col) }
