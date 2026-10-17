@@ -30,6 +30,9 @@ class SemanticResult:
     tree: Tree
     symbol_table: SymbolTable
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    expressions: dict = field(default_factory=dict)
+    scopes: dict = field(default_factory=dict)
+    declarations: dict = field(default_factory=dict)
 
     @property
     def errors(self):
@@ -64,13 +67,24 @@ class SemanticAnalyzer:
         self.function_stack: list[Symbol] = []
         self.class_stack: list[Symbol] = []
         self.loop_depth = 0
+        self.switch_depth = 0
+        self.expressions = {}
+        self.scopes = {}
 
     def analyze(self, tree: Tree) -> SemanticResult:
         program = tree.children[0] if _data(tree) == "start" else tree
         self._predeclare(program.children)
         self._visit_statements(program.children)
         self._emit_unused_warnings()
-        return SemanticResult(tree, self.table, self.diagnostics)
+        return SemanticResult(tree, self.table, self.diagnostics,
+                              self.expressions, self.scopes, self._declarations)
+
+    def generate_code(self, result):
+        """Segunda pasada: utiliza los atributos calculados por este Visitor."""
+        from .tac import TACGenerator
+        if not result.ok:
+            raise ValueError("no se puede generar TAC con errores semánticos")
+        return TACGenerator(result).generate()
 
     # ------------------------------------------------------------------
     # Diagnósticos y tipos
@@ -192,6 +206,7 @@ class SemanticAnalyzer:
         )
         if not self.table.declare(symbol):
             self.error(node, f"'{name}' ya fue declarado en este ámbito")
+
             self._declarations[id(node)] = None
         else:
             self._declarations[id(node)] = symbol
@@ -269,6 +284,7 @@ class SemanticAnalyzer:
         )
         if not self.table.declare(symbol):
             self.error(node, f"'{name}' ya fue declarado en este ámbito")
+        self._declarations[id(node)] = symbol
 
     def _visit_variable_declaration(self, node):
         self._declare_variable(node)
@@ -290,7 +306,10 @@ class SemanticAnalyzer:
         name, parameters, _, block = self._function_parts(node)
         environment = self.table.enter(f"función {name}", "función")
         symbol.environment = environment
+        self.scopes[id(node)] = environment
         self.function_stack.append(symbol)
+        saved_depths = self.loop_depth, self.switch_depth
+        self.loop_depth = self.switch_depth = 0
         self._validate_type_name(symbol.return_type, node)
 
         for parameter_name, parameter_type, parameter_node in \
@@ -307,6 +326,7 @@ class SemanticAnalyzer:
             if not self.table.declare(parameter_symbol):
                 self.error(parameter_node,
                            f"parámetro duplicado '{parameter_name}'")
+            self._declarations[id(parameter_node)] = parameter_symbol
 
         self._visit_block(block)
         if symbol.return_type != VOID and not self._guarantees_return(block):
@@ -314,6 +334,7 @@ class SemanticAnalyzer:
                        "en todos los caminos")
 
         self.function_stack.pop()
+        self.loop_depth, self.switch_depth = saved_depths
         self.table.exit()
 
     def _visit_class_declaration(self, node):
@@ -335,6 +356,7 @@ class SemanticAnalyzer:
 
         environment = self.table.enter(f"clase {symbol.name}", "clase")
         symbol.environment = environment
+        self.scopes[id(node)] = environment
         self.class_stack.append(symbol)
         members = [child for child in node.children[1:]
                    if isinstance(child, Tree)]
@@ -360,7 +382,7 @@ class SemanticAnalyzer:
         self.table.exit()
 
     def _visit_block(self, node):
-        self.table.enter("", "bloque")
+        self.scopes[id(node)] = self.table.enter("", "bloque")
         self._predeclare(node.children)
         self._visit_statements(node.children)
         self.table.exit()
@@ -395,7 +417,7 @@ class SemanticAnalyzer:
 
     def _visit_for_statement(self, node):
         block = next(child for child in node.children if _data(child) == "block")
-        self.table.enter("", "bucle")
+        self.scopes[id(node)] = self.table.enter("", "bucle")
         for child in node.children:
             kind = _data(child)
             if kind == "variable_declaration_no_semi":
@@ -417,9 +439,10 @@ class SemanticAnalyzer:
         item_type = collection[:-2] if collection.endswith("[]") else ERROR
         if item_type == ERROR and collection != ERROR:
             self.error(node.children[1], "foreach requiere una lista")
-        self.table.enter("", "bucle")
-        self.table.declare(Symbol(name, "variable", item_type,
-                                  *_location(node.children[0])))
+        self.scopes[id(node)] = self.table.enter("", "bucle")
+        symbol = Symbol(name, "variable", item_type, *_location(node.children[0]))
+        self.table.declare(symbol)
+        self._declarations[id(node)] = symbol
         self.loop_depth += 1
         self._visit_block(node.children[2])
         self.loop_depth -= 1
@@ -430,7 +453,8 @@ class SemanticAnalyzer:
         if condition_type not in {"boolean", ERROR}:
             self.error(node.children[0], f"la condición de switch debe ser "
                        f"boolean, no {condition_type}")
-        self.table.enter("", "switch")
+        self.scopes[id(node)] = self.table.enter("", "switch")
+        self.switch_depth += 1
         for child in node.children[1:]:
             if _data(child) == "switch_case":
                 case_type = self._eval(child.children[0]).type_name
@@ -443,19 +467,21 @@ class SemanticAnalyzer:
             elif _data(child) == "default_case":
                 self._predeclare(child.children)
                 self._visit_statements(child.children)
+        self.switch_depth -= 1
         self.table.exit()
 
     def _visit_try_catch_statement(self, node):
         self._visit_block(node.children[0])
         error_name = str(node.children[1])
-        self.table.enter("", "catch")
-        self.table.declare(Symbol(error_name, "variable", "string",
-                                  *_location(node.children[1])))
+        self.scopes[id(node)] = self.table.enter("", "catch")
+        symbol = Symbol(error_name, "variable", "string", *_location(node.children[1]))
+        self.table.declare(symbol)
+        self._declarations[id(node)] = symbol
         self._visit_block(node.children[2])
         self.table.exit()
 
     def _visit_break_statement(self, node):
-        if self.loop_depth == 0:
+        if self.loop_depth == 0 and self.switch_depth == 0:
             self.error(node, "break solo puede utilizarse dentro de un bucle")
 
     def _visit_continue_statement(self, node):
@@ -494,7 +520,9 @@ class SemanticAnalyzer:
                 return self._eval(node.children[0])
             self.error(node, f"expresión no soportada: {_data(node)}")
             return ExpressionInfo(ERROR)
-        return handler(node)
+        result = handler(node)
+        self.expressions[id(node)] = result
+        return result
 
     def _eval_integer_literal(self, node):
         return ExpressionInfo("integer")

@@ -17,6 +17,11 @@ class Symbol:
     environment: "Environment | None" = None
     metadata: dict[str, Any] = field(default_factory=dict)
     used: bool = False
+    address: str = ""
+    offset: int = 0
+    size: int = 0
+    label: str = ""
+    storage: str = ""
 
     @property
     def signature(self):
@@ -113,4 +118,11 @@ class SymbolTable:
                     symbol.column,
                 ))
         return rows
+
+    def code_rows(self):
+        """Reporte extendido sin cambiar las nueve columnas de la fase 1."""
+        symbols = [symbol for env in self.environments()
+                   for symbol in env.symbols.values()]
+        return [(*row, symbol.address, symbol.offset, symbol.size, symbol.label,
+                 symbol.storage) for symbol, row in zip(symbols, self.rows())]
 
