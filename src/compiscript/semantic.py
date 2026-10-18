@@ -126,6 +126,8 @@ class SemanticAnalyzer:
             return True
         if expected == actual:
             return True
+        if expected == 'Closure' and actual == 'función':
+            return True
         if actual == UNKNOWN + "[]" and expected.endswith("[]"):
             return True
         if actual == "null" and self._is_reference_type(expected):
@@ -150,7 +152,7 @@ class SemanticAnalyzer:
         base = type_name
         while base.endswith("[]"):
             base = base[:-2]
-        if base in {"integer", "float", "boolean", "string", VOID,
+        if base in {"integer", "float", "boolean", "string", 'Closure', VOID,
                     UNKNOWN, ERROR, "null"}:
             return
         if self._find_class(base) is None:
@@ -261,8 +263,8 @@ class SemanticAnalyzer:
         declared_type = self._type_from_tree(annotation)
         if annotation is not None:
             self._validate_type_name(declared_type, annotation)
-        value_type = (self._eval(value_node).type_name
-                      if value_node is not None else UNKNOWN)
+        value_info = self._eval(value_node) if value_node is not None else ExpressionInfo(UNKNOWN)
+        value_type = value_info.type_name
 
         if constant and value_node is None:
             self.error(node, f"la constante '{name}' debe inicializarse")
@@ -281,6 +283,7 @@ class SemanticAnalyzer:
             line=_location(node)[0],
             column=_location(node)[1],
             mutable=not constant,
+            metadata={'callable': value_info.symbol} if value_info.type_name in {'Closure', 'función'} else {},
         )
         if not self.table.declare(symbol):
             self.error(node, f"'{name}' ya fue declarado en este ámbito")
@@ -495,6 +498,10 @@ class SemanticAnalyzer:
             return
         function = self.function_stack[-1]
         actual = self._eval(node.children[0]).type_name if node.children else VOID
+        if function.return_type == 'Closure' and node.children:
+            signature = self.expressions[id(node.children[0])].symbol
+            if signature is not None:
+                function.metadata['callable'] = signature
         if not self._compatible(function.return_type, actual):
             self.error(node, f"return de tipo {actual}; la función "
                        f"'{function.name}' declara {function.return_type}")
@@ -585,6 +592,7 @@ class SemanticAnalyzer:
                 else:
                     member.used = True
                     result = ExpressionInfo(member.type_name, member, True)
+            self.expressions[id(suffix)] = result
         return result
 
     def _resolve_member(self, type_name, member_name):
@@ -621,6 +629,8 @@ class SemanticAnalyzer:
 
     def _call(self, callee, arguments, node):
         symbol = callee.symbol
+        if symbol is not None and symbol.kind not in {'función', 'método'}:
+            symbol = symbol.metadata.get('callable')
         if symbol is None or symbol.kind not in {"función", "método"}:
             self.error(node, "se intentó llamar un valor que no es función")
             for argument in arguments:
@@ -635,7 +645,7 @@ class SemanticAnalyzer:
             if not self._compatible(expected, actual):
                 self.error(node, f"argumento {index} de '{symbol.name}': "
                            f"se esperaba {expected} y llegó {actual}")
-        return ExpressionInfo(symbol.return_type)
+        return ExpressionInfo(symbol.return_type, symbol.metadata.get('callable'))
 
     def _eval_new_expr(self, node):
         name = str(node.children[0])
