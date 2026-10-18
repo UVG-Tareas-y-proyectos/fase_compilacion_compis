@@ -687,7 +687,12 @@ class SemanticAnalyzer:
         if not self._compatible(target.type_name, value.type_name):
             self.error(node, f"asignación incompatible: {target.type_name} = "
                        f"{value.type_name}")
-        return ExpressionInfo(target.type_name)
+        if target.symbol is not None and value.type_name in {'Closure', 'función'}:
+            signature = value.symbol
+            if signature is not None and signature.kind not in {'función', 'método'}:
+                signature = signature.metadata.get('callable')
+            target.symbol.metadata['callable'] = signature
+        return ExpressionInfo(target.type_name, value.symbol)
 
     def _eval_ternary_expr(self, node):
         if len(node.children) == 1:

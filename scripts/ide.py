@@ -12,6 +12,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from compiscript.pipeline import analyze_source  # noqa: E402
 from compiscript.tree import Token, Tree  # noqa: E402
+from compiscript.vm import TACMachine, RuntimeFault  # noqa: E402
+import json
 
 
 EXAMPLES = ROOT / "examples"
@@ -48,7 +50,7 @@ SYNTAX = [
 class CompiscriptIDE(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Compiscript - Fase 1: análisis semántico")
+        self.title("Compiscript - Fase 2: generación de TAC")
         self.geometry("1400x840")
         self.minsize(1050, 650)
         self.configure(bg=COLORS["background"])
@@ -104,12 +106,14 @@ class CompiscriptIDE(tk.Tk):
         toolbar.pack(fill="x", pady=(0, 10))
         tk.Label(toolbar, text="Compiscript", bg=c["background"], fg=c["text"],
                  font=("Segoe UI Semibold", 17)).pack(side="left")
-        tk.Label(toolbar, text="  Fase 1 · árbol · símbolos · semántica",
+        tk.Label(toolbar, text="  Fase 2 · semántica · TAC · registros",
                  bg=c["background"], fg=c["muted"],
                  font=("Segoe UI", 10)).pack(side="left", pady=(4, 0))
 
-        self._button(toolbar, "Analizar (F5)", self.analyze,
+        self._button(toolbar, "Compilar (F5)", self.analyze,
                      primary=True).pack(side="right")
+        self._button(toolbar, 'Ejecutar TAC', self.execute_tac).pack(side='right', padx=3)
+        self._button(toolbar, 'Exportar TAC', self.export_tac).pack(side='right', padx=3)
         self.example_name = tk.StringVar(value="basico")
         names = sorted(path.stem for path in EXAMPLES.glob("*.cps"))
         combo = ttk.Combobox(toolbar, textvariable=self.example_name,
@@ -180,6 +184,15 @@ class CompiscriptIDE(tk.Tk):
         self.notebook.add(self.ast_frame, text="Árbol sintáctico")
         self.notebook.add(self.symbol_frame, text="Tabla de símbolos")
         self.notebook.add(self.error_frame, text="Errores")
+        self.tac_frame = tk.Frame(self.notebook, bg=COLORS['panel'])
+        self.frame_frame = tk.Frame(self.notebook, bg=COLORS['panel'])
+        self.run_frame = tk.Frame(self.notebook, bg=COLORS['panel'])
+        self.notebook.add(self.tac_frame, text='TAC y cuádruplos')
+        self.notebook.add(self.frame_frame, text='Registros de activación')
+        self.notebook.add(self.run_frame, text='Ejecución del TAC')
+        self.tac_text = self._output_text(self.tac_frame)
+        self.frame_text = self._output_text(self.frame_frame)
+        self.run_text = self._output_text(self.run_frame)
 
         self.ast_tree = self._tree(self.ast_frame, ("Nodo", "Línea"),
                                    (600, 70), tree_column=True)
@@ -197,6 +210,25 @@ class CompiscriptIDE(tk.Tk):
         self.error_tree.tag_configure("error", foreground=COLORS["error"])
         self.error_tree.tag_configure("aviso", foreground=COLORS["warning"])
         self.error_tree.bind("<<TreeviewSelect>>", self._go_to_diagnostic)
+
+    def _output_text(self, parent):
+        text = tk.Text(parent, wrap='none', font=self.small_code_font,
+                       bg=COLORS['editor'], fg=COLORS['text'], relief='flat')
+        vertical = ttk.Scrollbar(parent, command=text.yview)
+        horizontal = ttk.Scrollbar(parent, orient='horizontal', command=text.xview)
+        text.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set, state='disabled')
+        text.grid(row=0, column=0, sticky='nsew')
+        vertical.grid(row=0, column=1, sticky='ns')
+        horizontal.grid(row=1, column=0, sticky='ew')
+        parent.rowconfigure(0, weight=1)
+        parent.columnconfigure(0, weight=1)
+        return text
+
+    def _set_text(self, widget, content):
+        widget.configure(state='normal')
+        widget.delete('1.0', 'end')
+        widget.insert('1.0', content)
+        widget.configure(state='disabled')
 
     def _tree(self, parent, columns, widths, tree_column=False):
         scrollbar = ttk.Scrollbar(parent, orient="vertical")
@@ -252,7 +284,7 @@ class CompiscriptIDE(tk.Tk):
         self.editor.insert("1.0", source)
         self.file_path = path
         self._highlight()
-        self.title("Compiscript - Fase 1" +
+        self.title("Compiscript - Fase 2" +
                    (f" - {path.name}" if path else ""))
 
     def open_file(self):
@@ -278,25 +310,67 @@ class CompiscriptIDE(tk.Tk):
 
     def analyze(self):
         try:
-            self.result = analyze_source(self.editor.get("1.0", "end-1c"))
+            self.result = analyze_source(self.editor.get("1.0", "end-1c"), generate_code=True)
         except Exception as exc:
             messagebox.showerror("Error interno", str(exc))
             raise
         self._show_ast()
         self._show_symbols()
         self._show_diagnostics()
+        self._show_tac()
+        self._set_text(self.run_text, 'Presione Ejecutar TAC para comprobar el resultado.')
 
         errors = len(self.result.errors)
         warnings = len(self.result.warnings)
         if errors:
-            self.status.configure(text=f"Fase 1 con {errors} error(es) y "
+            self.status.configure(text=f"Compilación con {errors} error(es) y "
                                        f"{warnings} aviso(s)",
                                   fg=COLORS["error"])
             self.notebook.select(self.error_frame)
         else:
-            self.status.configure(text=f"Fase 1 correcta · {warnings} aviso(s)",
+            self.status.configure(text=f"Fase 2 correcta · {warnings} aviso(s)",
                                   fg=COLORS["accent"])
-            self.notebook.select(self.symbol_frame)
+            self.notebook.select(self.tac_frame)
+
+    def _show_tac(self):
+        program = self.result.tac
+        if program is None:
+            self._set_text(self.tac_text, 'No se genera TAC mientras existan errores.')
+            self._set_text(self.frame_text, '')
+            return
+        quadruples = '\n'.join(' | '.join(map(str, row)) for row in program.quadruples())
+        self._set_text(self.tac_text, program.text() + '\nCUÁDRUPLOS\n' + quadruples)
+        frames = {f.label: {'registro': f.frame, 'temporales_distintos': f.temporary_count,
+                            'maximo_simultaneo': f.peak_live} for f in program.functions.values()}
+        symbols = [{'ambito': row[0], 'nombre': row[3], 'direccion': row[9],
+                    'desplazamiento': row[10], 'tamano': row[11],
+                    'etiqueta': row[12], 'almacenamiento': row[13]}
+                   for row in self.result.symbol_table.code_rows()]
+        self._set_text(self.frame_text, json.dumps({'registros': frames, 'simbolos': symbols,
+                                                   'clases': program.classes}, ensure_ascii=False, indent=2))
+
+    def execute_tac(self):
+        self.analyze()
+        if not self.result.ok or self.result.tac is None:
+            return
+        try:
+            execution = TACMachine(self.result.tac, max_steps=25000).run()
+            self._set_text(self.run_text, '\n'.join(execution.output) +
+                           f'\n\nInstrucciones: {execution.steps}\n'
+                           f'Profundidad máxima de llamadas: {execution.max_call_depth}')
+        except RuntimeFault as exc:
+            self._set_text(self.run_text, f'Error de ejecución L{exc.line}:C{exc.column}: {exc}')
+        self.notebook.select(self.run_frame)
+
+    def export_tac(self):
+        self.analyze()
+        if not self.result.ok or self.result.tac is None:
+            return
+        path = filedialog.asksaveasfilename(defaultextension='.tac',
+            filetypes=[('Código de tres direcciones', '*.tac'), ('Cuádruplos y metadatos', '*.json')])
+        if path:
+            content = self.result.tac.to_json() if path.endswith('.json') else self.result.tac.text()
+            Path(path).write_text(content, encoding='utf-8')
 
     def _show_ast(self):
         self.ast_tree.delete(*self.ast_tree.get_children())

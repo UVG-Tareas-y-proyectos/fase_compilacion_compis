@@ -459,6 +459,9 @@ class TACGenerator(SemanticAnalyzer):
         for value in values:
             self.emit('param', value.place, node=node)
         result = self.temporary(type_name)
+        info = self.attributes.get(id(node))
+        if info:
+            result.symbol = info.symbol
         self.emit('call', callee.place, str(len(values)), result.place, node)
         self.release(callee, *values)
         return result
