@@ -153,6 +153,124 @@ class TACGenerator(SemanticAnalyzer):
         self.emit('print', value.place, node=node)
         self.release(value)
 
+    def _branch_false(self, expression, target):
+        value = self._expr(expression)
+        self.emit('ifFalse', value.place, result=target, node=expression)
+        self.release(value)
+
+    def _stmt_if_statement(self, node):
+        other, end = self.label(), self.label()
+        self._branch_false(node.children[0], other)
+        self._stmt_block(node.children[1])
+        self.emit('goto', result=end)
+        self.mark(other)
+        if len(node.children) > 2:
+            self._stmt_block(node.children[2])
+        self.mark(end)
+
+    def _loop_body(self, block, end, step):
+        self.break_targets.append((end, self.depth))
+        self.continue_targets.append((step, self.depth))
+        self._stmt_block(block)
+        self.continue_targets.pop()
+        self.break_targets.pop()
+
+    def _stmt_while_statement(self, node):
+        start, end = self.label(), self.label()
+        self.mark(start)
+        self._branch_false(node.children[0], end)
+        self._loop_body(node.children[1], end, start)
+        self.emit('goto', result=start)
+        self.mark(end)
+
+    def _stmt_do_while_statement(self, node):
+        start, step, end = self.label(), self.label(), self.label()
+        self.mark(start)
+        self._loop_body(node.children[0], end, step)
+        self.mark(step)
+        self._branch_false(node.children[1], end)
+        self.emit('goto', result=start)
+        self.mark(end)
+
+    def _stmt_for_statement(self, node):
+        previous = self._enter(node)
+        block = next(c for c in node.children if _data(c) == 'block')
+        condition = next((c for c in node.children if _data(c) == 'for_condition'), None)
+        update = next((c for c in node.children if _data(c) == 'for_update'), None)
+        for child in node.children:
+            if child is block or child is condition or child is update:
+                continue
+            if _data(child) == 'variable_declaration_no_semi':
+                self._stmt_variable_declaration(child)
+            else:
+                self.release(self._expr(child))
+        start, step, end = self.label(), self.label(), self.label()
+        self.mark(start)
+        if condition:
+            self._branch_false(condition.children[0], end)
+        self._loop_body(block, end, step)
+        self.mark(step)
+        if update:
+            self.release(self._expr(update.children[0]))
+        self.emit('goto', result=start)
+        self.mark(end)
+        self._leave(previous)
+
+    def _jump_context(self, node, targets):
+        if not targets:
+            raise GenerationError(node, 'salto sin contexto de destino')
+        target, depth = targets[-1]
+        for _ in range(self.depth - depth):
+            self.emit('leave', node=node)
+        self.emit('goto', result=target, node=node)
+
+    def _stmt_break_statement(self, node):
+        self._jump_context(node, self.break_targets)
+
+    def _stmt_continue_statement(self, node):
+        self._jump_context(node, self.continue_targets)
+
+    def _stmt_switch_statement(self, node):
+        previous = self._enter(node)
+        value = self._expr(node.children[0])
+        end = self.label()
+        cases = [(child, self.label()) for child in node.children[1:]]
+        fallback = end
+        for child, label in cases:
+            if _data(child) == 'default_case':
+                fallback = label
+            else:
+                expected = self._expr(child.children[0])
+                test = self.temporary('boolean')
+                self.emit('==', value.place, expected.place, test.place, child)
+                self.emit('if', test.place, result=label, node=child)
+                self.release(expected, test)
+        self.emit('goto', result=fallback)
+        self.release(value)
+        self.break_targets.append((end, self.depth))
+        for child, label in cases:
+            self.mark(label)
+            statements = child.children[1:] if _data(child) == 'switch_case' else child.children
+            self._statements(statements)
+        self.break_targets.pop()
+        self.mark(end)
+        self._leave(previous)
+
+    def _stmt_try_catch_statement(self, node):
+        catch, end = self.label(), self.label()
+        self.emit('try', result=catch, node=node)
+        self._stmt_block(node.children[0])
+        self.emit('endtry')
+        self.emit('goto', result=end)
+        self.mark(catch)
+        previous = self._enter(node)
+        error = self.declarations[id(node)]
+        self.emit('declare', error.address)
+        self.emit('exception', result=error.address)
+        self._stmt_block(node.children[2])
+        self._leave(previous)
+        self.mark(end)
+
     def _literal(self, node):
         return Value(str(node.children[0]), self._type(node))
 
