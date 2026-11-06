@@ -32,3 +32,9 @@ def test_callable_return_can_be_called_directly():
     result = compile_source('function f(): Closure { function g(x: float): float { return x; } return g; } print(f()(2));')
     assert result.ok, [str(d) for d in result.diagnostics]
     assert TACMachine(result.tac).run().output == ['2.0']
+
+
+def test_float_remainder_preserves_dividend_sign():
+    result=compile_source('print(9.0%2.0); print(-9.0%2.0);')
+    assert result.ok
+    assert TACMachine(result.tac).run().output==['1.0','-1.0']

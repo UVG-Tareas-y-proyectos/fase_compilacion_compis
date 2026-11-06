@@ -7,6 +7,7 @@ permanecen vivos mientras alguna closure los referencia.
 
 from dataclasses import dataclass, field
 import json
+import math
 import operator
 
 
@@ -206,7 +207,7 @@ class TACMachine:
                         raise RuntimeFault('división entre cero')
                     # División entera truncada hacia cero, sin convertir a float.
                     value = (abs(x) // abs(y)) * (-1 if (x < 0) != (y < 0) else 1) if type(x) is type(y) is int else x / y
-                    write(r, value if op == '/' else x - value * y)
+                    write(r, value if op == '/' else x - value * y if type(x) is type(y) is int else math.fmod(x,y))
                 elif op in {'neg', '!', 'i2f'}:
                     x = read(a)
                     write(r, -x if op == 'neg' else not x if op == '!' else float(x))
