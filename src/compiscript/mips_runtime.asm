@@ -26,6 +26,7 @@ __cs_msg_arity: .asciiz "cantidad de argumentos inválida"
 __cs_msg_callable: .asciiz "se intentó ejecutar un valor que no es una closure"
 __cs_msg_depth: .asciiz "se excedió el límite de profundidad de llamadas"
 __cs_msg_index: .asciiz "índice fuera de rango"
+__cs_msg_overflow: .asciiz "desbordamiento de integer MIPS32"
 .text
 
 # Reservas de tamaño múltiplo de ocho mantienen double alineado.
@@ -213,6 +214,11 @@ __cs_numeric_ready:
     beq $a2, 1, __cs_int_sub
     beq $a2, 2, __cs_int_mul
     beq $t3, $zero, __cs_err_zero
+    li $t4, -2147483648
+    bne $t2, $t4, __cs_int_div_safe
+    li $t4, -1
+    beq $t3, $t4, __cs_err_overflow
+__cs_int_div_safe:
     div $t2, $t3
     beq $a2, 3, __cs_int_quotient
     mfhi $a0
@@ -222,13 +228,24 @@ __cs_int_quotient:
     j __cs_int_box
 __cs_int_add:
     addu $a0, $t2, $t3
+    xor $t4, $t2, $t3
+    bltz $t4, __cs_int_box
+    xor $t4, $t2, $a0
+    bltz $t4, __cs_err_overflow
     j __cs_int_box
 __cs_int_sub:
     subu $a0, $t2, $t3
+    xor $t4, $t2, $t3
+    bgez $t4, __cs_int_box
+    xor $t4, $t2, $a0
+    bltz $t4, __cs_err_overflow
     j __cs_int_box
 __cs_int_mul:
     mult $t2, $t3
     mflo $a0
+    mfhi $t4
+    sra $t5, $a0, 31
+    bne $t4, $t5, __cs_err_overflow
 __cs_int_box:
     li $a1, 1
     jal __cs_box
@@ -265,10 +282,36 @@ __cs_double_ready:
     bc1t __cs_err_zero
     div.d $f4, $f0, $f2
     beq $a2, 3, __cs_float_div_result
-    trunc.w.d $f6, $f4
-    cvt.d.w $f6, $f6
-    mul.d $f6, $f6, $f2
-    sub.d $f0, $f0, $f6
+    # Residuo sin convertir el cociente a un entero de 32 bits.
+    abs.d $f6, $f0
+    abs.d $f8, $f2
+    mov.d $f10, $f8
+    li $t2, 2
+    mtc1 $t2, $f12
+    cvt.d.w $f12, $f12
+__cs_float_mod_scale:
+    mul.d $f14, $f10, $f12
+    c.le.d $f14, $f6
+    bc1f __cs_float_mod_reduce
+    mov.d $f10, $f14
+    j __cs_float_mod_scale
+__cs_float_mod_reduce:
+    c.lt.d $f10, $f8
+    bc1t __cs_float_mod_sign
+    c.lt.d $f6, $f10
+    bc1t __cs_float_mod_half
+    sub.d $f6, $f6, $f10
+__cs_float_mod_half:
+    div.d $f10, $f10, $f12
+    j __cs_float_mod_reduce
+__cs_float_mod_sign:
+    mtc1 $zero, $f14
+    cvt.d.w $f14, $f14
+    c.lt.d $f0, $f14
+    bc1f __cs_float_mod_positive
+    neg.d $f6, $f6
+__cs_float_mod_positive:
+    mov.d $f0, $f6
     j __cs_float_box
 __cs_float_div_result:
     mov.d $f0, $f4
@@ -347,6 +390,8 @@ __cs_neg:
     beq $t0, 3, __cs_neg_double
     bne $t0, 1, __cs_err_type
     lw $t0, 4($a0)
+    li $t1, -2147483648
+    beq $t0, $t1, __cs_err_overflow
     subu $a0, $zero, $t0
     li $a1, 1
     j __cs_box
@@ -499,6 +544,9 @@ __cs_show:
     beq $t0, 2, __cs_show_bool
     beq $t0, 3, __cs_show_float
     beq $t0, 4, __cs_show_string
+    beq $t0, 5, __cs_show_list
+    beq $t0, 6, __cs_show_closure
+    beq $t0, 8, __cs_show_object
     la $a0, __cs_s_ref
     li $v0, 4
     syscall
@@ -574,6 +622,9 @@ __cs_err_depth:
     j __cs_fail
 __cs_err_index:
     la $a0, __cs_msg_index
+    j __cs_fail
+__cs_err_overflow:
+    la $a0, __cs_msg_overflow
 __cs_fail:
     addiu $sp, $sp, -8
     sw $a0, 0($sp)
@@ -618,3 +669,335 @@ __cs_fail_uncaught:
     li $a0, 1
     li $v0, 17
     syscall
+
+.data
+__cs_s_comma: .asciiz ", "
+__cs_s_closure: .asciiz "<closure "
+__cs_msg_method: .asciiz "método inexistente"
+__cs_index_prefix: .asciiz "índice fuera de rango: "
+.align 3
+__cs_index_prefix_value: .word 4, __cs_index_prefix, 0, 0
+.text
+__cs_newlist:
+    move $t0, $a0
+    sll $a0, $t0, 2
+    addiu $a0, $a0, 8
+    li $t2, -8
+    and $a0, $a0, $t2
+    li $v0, 9
+    syscall
+    move $t1, $v0
+    move $t2, $zero
+    la $t4, __cs_null
+__cs_newlist_init:
+    bge $t2, $t0, __cs_newlist_box
+    sll $t3, $t2, 2
+    addu $t3, $t3, $t1
+    sw $t4, 0($t3)
+    addiu $t2, $t2, 1
+    j __cs_newlist_init
+__cs_newlist_box:
+    li $a0, 16
+    li $v0, 9
+    syscall
+    li $t2, 5
+    sw $t2, 0($v0)
+    sw $t0, 4($v0)
+    sw $t1, 8($v0)
+    jr $ra
+    nop
+__cs_length:
+    lw $t0, 0($a0)
+    beq $t0, 4, __cs_length_string
+    bne $t0, 5, __cs_err_type
+    lw $a0, 4($a0)
+    li $a1, 1
+    j __cs_box
+__cs_length_string:
+    lw $t0, 4($a0)
+    move $a0, $zero
+__cs_length_loop:
+    lbu $t1, 0($t0)
+    beq $t1, $zero, __cs_length_done
+    addiu $a0, $a0, 1
+    addiu $t0, $t0, 1
+    j __cs_length_loop
+__cs_length_done:
+    li $a1, 1
+    j __cs_box
+__cs_index_address:
+    lw $t0, 0($a0)
+    bne $t0, 5, __cs_err_type
+    lw $t0, 0($a1)
+    bne $t0, 1, __cs_err_type
+    lw $t2, 4($a1)
+    bltz $t2, __cs_index_fail
+    lw $t0, 4($a0)
+    bge $t2, $t0, __cs_index_fail
+    lw $t0, 8($a0)
+    sll $t2, $t2, 2
+    addu $v0, $t0, $t2
+    jr $ra
+    nop
+__cs_load_index:
+    addiu $sp, $sp, -8
+    sw $ra, 0($sp)
+    jal __cs_index_address
+    lw $v0, 0($v0)
+    lw $ra, 0($sp)
+    addiu $sp, $sp, 8
+    jr $ra
+    nop
+__cs_store_index:
+    addiu $sp, $sp, -8
+    sw $ra, 0($sp)
+    jal __cs_index_address
+    sw $a2, 0($v0)
+    lw $ra, 0($sp)
+    addiu $sp, $sp, 8
+    jr $ra
+    nop
+# Conversión decimal de un entero para mensajes de error.
+__cs_int_string:
+    move $t0, $a0
+    li $a0, 32
+    li $v0, 9
+    syscall
+    addiu $t1, $v0, 31
+    sb $zero, 0($t1)
+    slt $t4, $t0, $zero
+    beq $t4, $zero, __cs_int_string_loop
+    subu $t0, $zero, $t0
+__cs_int_string_loop:
+    li $t2, 10
+    divu $t0, $t2
+    mfhi $t3
+    mflo $t0
+    addiu $t3, $t3, 48
+    addiu $t1, $t1, -1
+    sb $t3, 0($t1)
+    bne $t0, $zero, __cs_int_string_loop
+    beq $t4, $zero, __cs_int_string_done
+    addiu $t1, $t1, -1
+    li $t3, 45
+    sb $t3, 0($t1)
+__cs_int_string_done:
+    move $v0, $t1
+    jr $ra
+    nop
+__cs_index_fail:
+    move $a0, $t2
+    jal __cs_int_string
+    move $a0, $v0
+    li $a1, 4
+    jal __cs_box
+    move $a1, $v0
+    la $a0, __cs_index_prefix_value
+    jal __cs_concat
+    lw $a0, 4($v0)
+    j __cs_fail
+
+__cs_class:
+    move $t0, $a0
+    move $t1, $a1
+    move $t2, $a2
+    li $a0, 16
+    li $v0, 9
+    syscall
+    li $t3, 7
+    sw $t3, 0($v0)
+    sw $t0, 4($v0)
+    sw $t1, 8($v0)
+    sw $t2, 12($v0)
+    jr $ra
+    nop
+__cs_load_field:
+    lw $t0, 0($a0)
+    bne $t0, 8, __cs_err_type
+    lw $a0, 8($a0)
+    j __cs_get
+__cs_store_field:
+    lw $t0, 0($a0)
+    bne $t0, 8, __cs_err_type
+    addiu $sp, $sp, -24
+    sw $ra, 0($sp)
+    lw $a0, 8($a0)
+    sw $a0, 4($sp)
+    sw $a1, 8($sp)
+    sw $a2, 12($sp)
+    lw $t0, 4($a0)
+__cs_field_find:
+    beq $t0, $zero, __cs_field_declare
+    lw $t1, 0($t0)
+    beq $t1, $a1, __cs_field_set
+    lw $t0, 8($t0)
+    j __cs_field_find
+__cs_field_declare:
+    jal __cs_declare
+__cs_field_set:
+    lw $a0, 4($sp)
+    lw $a1, 8($sp)
+    lw $a2, 12($sp)
+    jal __cs_set
+    lw $ra, 0($sp)
+    addiu $sp, $sp, 24
+    jr $ra
+    nop
+__cs_method:
+    move $t6, $a0
+    lw $t0, 0($a0)
+    bne $t0, 8, __cs_err_type
+    lw $t0, 4($a0)
+__cs_method_class:
+    lw $t1, 0($t0)
+    bne $t1, 7, __cs_method_missing
+    lw $t1, 4($t0)
+    lw $t2, 4($t1)
+    addiu $t3, $t1, 12
+__cs_method_search:
+    beq $t2, $zero, __cs_method_parent
+    lw $t4, 0($t3)
+    beq $t4, $a1, __cs_method_found
+    addiu $t3, $t3, 8
+    addiu $t2, $t2, -1
+    j __cs_method_search
+__cs_method_parent:
+    lw $t0, 12($t0)
+    j __cs_method_class
+__cs_method_found:
+    lw $a0, 4($t3)
+    lw $a1, 8($t0)
+    move $a2, $t6
+    j __cs_closure
+__cs_method_missing:
+    la $a0, __cs_msg_method
+    j __cs_fail
+__cs_new:
+    lw $t0, 0($a0)
+    bne $t0, 7, __cs_err_type
+    addiu $sp, $sp, -24
+    sw $ra, 0($sp)
+    sw $a0, 4($sp)
+    li $a0, 16
+    li $v0, 9
+    syscall
+    li $t0, 8
+    sw $t0, 0($v0)
+    lw $t0, 4($sp)
+    sw $t0, 4($v0)
+    sw $v0, 8($sp)
+    move $a0, $zero
+    jal __cs_env_new
+    lw $t0, 8($sp)
+    sw $v0, 8($t0)
+    lw $a0, 4($sp)
+    move $a1, $t0
+    jal __cs_init_chain
+    lw $v0, 8($sp)
+    lw $ra, 0($sp)
+    addiu $sp, $sp, 24
+    jr $ra
+    nop
+# Inicializar la clase padre antes de la hija, sobre el mismo objeto.
+__cs_init_chain:
+    addiu $sp, $sp, -24
+    sw $ra, 0($sp)
+    sw $a0, 4($sp)
+    sw $a1, 8($sp)
+    lw $a0, 12($a0)
+    lw $t0, 0($a0)
+    bne $t0, 7, __cs_init_own
+    jal __cs_init_chain
+__cs_init_own:
+    lw $t0, 4($sp)
+    lw $t1, 4($t0)
+    lw $a0, 0($t1)
+    lw $a1, 8($t0)
+    lw $a2, 8($sp)
+    jal __cs_closure
+    move $a0, $v0
+    move $a1, $zero
+    move $a2, $zero
+    lw $t9, 4($a0)
+    jalr $t9
+    lw $ra, 0($sp)
+    addiu $sp, $sp, 24
+    jr $ra
+    nop
+
+__cs_show_list:
+    addiu $sp, $sp, -16
+    sw $ra, 0($sp)
+    sw $a0, 4($sp)
+    sw $zero, 8($sp)
+    li $a0, 91
+    li $v0, 11
+    syscall
+__cs_show_list_loop:
+    lw $t0, 4($sp)
+    lw $t1, 8($sp)
+    lw $t2, 4($t0)
+    bge $t1, $t2, __cs_show_list_end
+    beq $t1, $zero, __cs_show_list_item
+    la $a0, __cs_s_comma
+    li $v0, 4
+    syscall
+__cs_show_list_item:
+    lw $t2, 8($t0)
+    sll $t3, $t1, 2
+    addu $t2, $t2, $t3
+    lw $a0, 0($t2)
+    jal __cs_show
+    lw $t1, 8($sp)
+    addiu $t1, $t1, 1
+    sw $t1, 8($sp)
+    j __cs_show_list_loop
+__cs_show_list_end:
+    li $a0, 93
+    li $v0, 11
+    syscall
+    lw $ra, 0($sp)
+    addiu $sp, $sp, 16
+    jr $ra
+    nop
+__cs_show_object:
+    lw $t0, 4($a0)
+    lw $t0, 4($t0)
+    lw $t0, 8($t0)
+    li $a0, 60
+    li $v0, 11
+    syscall
+    move $a0, $t0
+    li $v0, 4
+    syscall
+    li $a0, 62
+    li $v0, 11
+    syscall
+    jr $ra
+    nop
+__cs_show_closure:
+    lw $t0, 4($a0)
+    la $t1, __cs_fn_names
+    lw $t2, 0($t1)
+    addiu $t1, $t1, 4
+__cs_show_closure_find:
+    beq $t2, $zero, __cs_show_closure_end
+    lw $t3, 0($t1)
+    beq $t3, $t0, __cs_show_closure_name
+    addiu $t1, $t1, 8
+    addiu $t2, $t2, -1
+    j __cs_show_closure_find
+__cs_show_closure_name:
+    lw $t0, 4($t1)
+    la $a0, __cs_s_closure
+    li $v0, 4
+    syscall
+    move $a0, $t0
+    li $v0, 4
+    syscall
+__cs_show_closure_end:
+    li $a0, 62
+    li $v0, 11
+    syscall
+    jr $ra
+    nop

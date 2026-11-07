@@ -137,6 +137,9 @@ class MIPSGenerator:
         self.emit('syscall')
         for label,function in self.program.functions.items():
             self.function(label,function)
+        function_names=[(self.functions[label],self.string(label)) for label in self.program.functions]
+        self.data.extend(['.align 2','__cs_fn_names:',f'.word {len(function_names)}'])
+        self.data.extend(f'.word {code}, {name}' for code,name in function_names)
         for label,desc in self.program.classes.items():
             if desc['initializer'] not in self.functions or any(v not in self.functions for v in desc['methods'].values()):
                 raise MIPSError('descriptor de clase con función inexistente')

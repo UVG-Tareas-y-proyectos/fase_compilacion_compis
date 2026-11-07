@@ -59,3 +59,43 @@ def test_literals_outside_mips_word_are_rejected():
 
 def test_assembler_failure_is_not_reported_as_success():
     assert not run_mars('.text\n.globl main\nmain: instruccion_inexistente\n',assemble_only=True).ok
+
+
+# Mismos casos de comportamiento de fase 2, ejecutados ahora en MARS.
+from test_execution import test_generated_tac_preserves_behavior as _behavior_spec
+BEHAVIOR_CASES=next(m.args[1] for m in _behavior_spec.pytestmark if m.name=='parametrize')
+
+
+@pytest.mark.parametrize(('source','expected'),BEHAVIOR_CASES)
+def test_existing_language_behaviors_run_as_real_mips(source,expected):
+    compiled=compile_source(source)
+    assert compiled.ok
+    execution=run_mars(MIPSGenerator(compiled.tac).generate().text())
+    assert execution.ok,execution.stderr+execution.stdout
+    assert execution.stdout.splitlines()==expected
+
+
+@pytest.mark.parametrize('name',['basico','clases_listas','fase2_expresiones','fase2_control',
+    'fase2_funciones_closures','fase2_objetos_listas','fase2_error_ejecucion'])
+def test_previous_examples_match_tac_in_mars(name):
+    compare((Path(__file__).resolve().parents[1]/'examples'/f'{name}.cps').read_text(encoding='utf-8'))
+
+
+@pytest.mark.parametrize('source',[
+    'let xs=[[1,2],[3,4]]; print(xs);',
+    'function f(x:integer):integer {return 1/x;} try {print(f(0));} catch(e){print(e);} print(f(2));',
+    'function f():integer {try {return 5;} catch(e){return 2;}} print(f()); try{print(1/0);} catch(e){print(e);}',
+    'function f():Closure { function g(x:float):float{return x;} return g;} print(f()(2));',
+    'let xs=[1]; try{print(xs[-1]);}catch(e){print(e);} print(xs[0]);',
+    'class A {let x=1; function m():integer{return this.x;}} class B:A {function m():integer{return this.x+2;}} let b=new B(); print(b.m()); print(b);',
+    'function f():integer{return 1;} print(f); print(10000000000.0%3.0);',
+])
+def test_advanced_values_exceptions_and_capture(source):
+    compare(source,delayed=True)
+
+
+@pytest.mark.parametrize('expr',['2147483647+1','50000*50000','-2147483647-2'])
+def test_integer_overflow_reports_error_instead_of_silent_wrap(expr):
+    result=compile_source('print('+expr+');')
+    execution=run_mars(MIPSGenerator(result.tac).generate().text())
+    assert not execution.ok and 'desbordamiento' in execution.stdout
