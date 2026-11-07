@@ -14,6 +14,9 @@ from compiscript.pipeline import analyze_source  # noqa: E402
 from compiscript.tree import Token, Tree  # noqa: E402
 from compiscript.vm import TACMachine, RuntimeFault  # noqa: E402
 import json
+import queue
+import threading
+from compiscript.mips_runner import run_mars, SimulatorError
 
 
 EXAMPLES = ROOT / "examples"
@@ -50,12 +53,14 @@ SYNTAX = [
 class CompiscriptIDE(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Compiscript - Fase 2: generación de TAC")
+        self.title("Compiscript - Fase 3: generación MIPS")
         self.geometry("1400x840")
         self.minsize(1050, 650)
         self.configure(bg=COLORS["background"])
         self.file_path = None
         self.result = None
+        self.run_generation=0
+        self.mips_queue=queue.Queue()
 
         family = self._monospace_font()
         self.code_font = (family, 11)
@@ -84,7 +89,7 @@ class CompiscriptIDE(tk.Tk):
         style.configure("TFrame", background=c["background"])
         style.configure("TNotebook", background=c["panel"], borderwidth=0)
         style.configure("TNotebook.Tab", background=c["surface"],
-                        foreground=c["muted"], padding=(14, 8))
+                        foreground=c["muted"], padding=(8, 8))
         style.map("TNotebook.Tab",
                   background=[("selected", c["panel"])],
                   foreground=[("selected", c["text"])])
@@ -106,14 +111,18 @@ class CompiscriptIDE(tk.Tk):
         toolbar.pack(fill="x", pady=(0, 10))
         tk.Label(toolbar, text="Compiscript", bg=c["background"], fg=c["text"],
                  font=("Segoe UI Semibold", 17)).pack(side="left")
-        tk.Label(toolbar, text="  Fase 2 · semántica · TAC · registros",
+        tk.Label(toolbar, text="  Fase 3 · TAC · MIPS",
                  bg=c["background"], fg=c["muted"],
                  font=("Segoe UI", 10)).pack(side="left", pady=(4, 0))
+        actions=tk.Frame(container,bg=c['background'])
+        actions.pack(fill='x',pady=(0,10))
 
-        self._button(toolbar, "Compilar (F5)", self.analyze,
+        self._button(actions, "Compilar (F5)", self.analyze,
                      primary=True).pack(side="right")
-        self._button(toolbar, 'Ejecutar TAC', self.execute_tac).pack(side='right', padx=3)
-        self._button(toolbar, 'Exportar TAC', self.export_tac).pack(side='right', padx=3)
+        self._button(actions,'Ejecutar MIPS (F6)',self.execute_mips).pack(side='right',padx=3)
+        self._button(actions,'Exportar MIPS',self.export_mips).pack(side='right',padx=3)
+        self._button(actions, 'Ejecutar TAC', self.execute_tac).pack(side='right', padx=3)
+        self._button(actions, 'Exportar TAC', self.export_tac).pack(side='right', padx=3)
         self.example_name = tk.StringVar(value="basico")
         names = sorted(path.stem for path in EXAMPLES.glob("*.cps"))
         combo = ttk.Combobox(toolbar, textvariable=self.example_name,
@@ -181,18 +190,24 @@ class CompiscriptIDE(tk.Tk):
         self.ast_frame = tk.Frame(self.notebook, bg=COLORS["panel"])
         self.symbol_frame = tk.Frame(self.notebook, bg=COLORS["panel"])
         self.error_frame = tk.Frame(self.notebook, bg=COLORS["panel"])
-        self.notebook.add(self.ast_frame, text="Árbol sintáctico")
-        self.notebook.add(self.symbol_frame, text="Tabla de símbolos")
+        self.notebook.add(self.ast_frame, text="Árbol")
+        self.notebook.add(self.symbol_frame, text="Símbolos")
         self.notebook.add(self.error_frame, text="Errores")
         self.tac_frame = tk.Frame(self.notebook, bg=COLORS['panel'])
         self.frame_frame = tk.Frame(self.notebook, bg=COLORS['panel'])
         self.run_frame = tk.Frame(self.notebook, bg=COLORS['panel'])
-        self.notebook.add(self.tac_frame, text='TAC y cuádruplos')
-        self.notebook.add(self.frame_frame, text='Registros de activación')
-        self.notebook.add(self.run_frame, text='Ejecución del TAC')
+        self.notebook.add(self.tac_frame, text='TAC')
+        self.notebook.add(self.frame_frame, text='Memoria')
+        self.notebook.add(self.run_frame, text='Salida TAC')
         self.tac_text = self._output_text(self.tac_frame)
         self.frame_text = self._output_text(self.frame_frame)
         self.run_text = self._output_text(self.run_frame)
+        self.mips_frame=tk.Frame(self.notebook,bg=COLORS['panel'])
+        self.mips_run_frame=tk.Frame(self.notebook,bg=COLORS['panel'])
+        self.notebook.add(self.mips_frame,text='MIPS')
+        self.notebook.add(self.mips_run_frame,text='Salida MIPS')
+        self.mips_text=self._output_text(self.mips_frame)
+        self.mips_run_text=self._output_text(self.mips_run_frame)
 
         self.ast_tree = self._tree(self.ast_frame, ("Nodo", "Línea"),
                                    (600, 70), tree_column=True)
@@ -253,6 +268,7 @@ class CompiscriptIDE(tk.Tk):
 
     def _bind_shortcuts(self):
         self.bind("<F5>", lambda _event: self.analyze())
+        self.bind('<F6>',lambda _event:self.execute_mips())
         self.bind("<Control-o>", lambda _event: self.open_file())
         self.bind("<Control-s>", lambda _event: self.save_file())
 
@@ -284,7 +300,7 @@ class CompiscriptIDE(tk.Tk):
         self.editor.insert("1.0", source)
         self.file_path = path
         self._highlight()
-        self.title("Compiscript - Fase 2" +
+        self.title("Compiscript - Fase 3" +
                    (f" - {path.name}" if path else ""))
 
     def open_file(self):
@@ -309,8 +325,9 @@ class CompiscriptIDE(tk.Tk):
                                   encoding="utf-8")
 
     def analyze(self):
+        self.run_generation+=1
         try:
-            self.result = analyze_source(self.editor.get("1.0", "end-1c"), generate_code=True)
+            self.result = analyze_source(self.editor.get("1.0", "end-1c"), generate_mips=True)
         except Exception as exc:
             messagebox.showerror("Error interno", str(exc))
             raise
@@ -318,6 +335,11 @@ class CompiscriptIDE(tk.Tk):
         self._show_symbols()
         self._show_diagnostics()
         self._show_tac()
+        self._set_text(self.mips_text,self.result.mips.text() if self.result.mips else 'No se genera MIPS mientras existan errores.')
+        self._set_text(self.mips_run_text,'Presione Ejecutar MIPS (F6) para ejecutar en MARS.')
+        if self.result.mips:
+            self._set_text(self.frame_text,self.frame_text.get('1.0','end').rstrip()+'\n\nMARCOS FÍSICOS MIPS32\n'+
+                           json.dumps({'marcos':self.result.mips.frames,'registros':self.result.mips.registers},ensure_ascii=False,indent=2))
         self._set_text(self.run_text, 'Presione Ejecutar TAC para comprobar el resultado.')
 
         errors = len(self.result.errors)
@@ -328,9 +350,51 @@ class CompiscriptIDE(tk.Tk):
                                   fg=COLORS["error"])
             self.notebook.select(self.error_frame)
         else:
-            self.status.configure(text=f"Fase 2 correcta · {warnings} aviso(s)",
+            self.status.configure(text=f"Fase 3 correcta · {warnings} aviso(s)",
                                   fg=COLORS["accent"])
-            self.notebook.select(self.tac_frame)
+            self.notebook.select(self.mips_frame)
+
+    def execute_mips(self):
+        self.analyze()
+        if not self.result.ok or self.result.mips is None:
+            return
+        token=self.run_generation
+        assembly=self.result.mips.text()
+        self._set_text(self.mips_run_text,'Ejecutando ensamblador en MARS...')
+        self.notebook.select(self.mips_run_frame)
+        def worker():
+            try:
+                result=run_mars(assembly,timeout=15,max_steps=2000000)
+                text=result.stdout
+                if result.stderr.strip():
+                    text+='\n'+result.stderr.strip()
+                text+='\n\n'+('MARS terminó correctamente.' if result.ok else 'MARS terminó con errores.')
+            except SimulatorError as exc:
+                text=str(exc)
+            self.mips_queue.put((token,text))
+        threading.Thread(target=worker,daemon=True).start()
+        self.after(50,lambda:self._poll_mips(token))
+
+    def _poll_mips(self, token):
+        if token!=self.run_generation:
+            return
+        while not self.mips_queue.empty():
+            result_token,text=self.mips_queue.get_nowait()
+            if result_token==token:
+                self._set_text(self.mips_run_text,text)
+                return
+        self.after(50,lambda:self._poll_mips(token))
+
+    def export_mips(self):
+        self.analyze()
+        if not self.result.ok or self.result.mips is None:
+            return
+        path=filedialog.asksaveasfilename(defaultextension='.asm',filetypes=[('Ensamblador MIPS','*.asm')])
+        if path:
+            try:
+                Path(path).write_text(self.result.mips.text(),encoding='utf-8')
+            except OSError as exc:
+                messagebox.showerror('Exportar MIPS',str(exc))
 
     def _show_tac(self):
         program = self.result.tac

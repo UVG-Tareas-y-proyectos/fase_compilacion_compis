@@ -27,6 +27,7 @@ __cs_msg_callable: .asciiz "se intentó ejecutar un valor que no es una closure"
 __cs_msg_depth: .asciiz "se excedió el límite de profundidad de llamadas"
 __cs_msg_index: .asciiz "índice fuera de rango"
 __cs_msg_overflow: .asciiz "desbordamiento de integer MIPS32"
+__cs_msg_float: .asciiz "resultado float no finito"
 .text
 
 # Reservas de tamaño múltiplo de ocho mantienen double alineado.
@@ -43,6 +44,10 @@ __cs_box:
     jr $ra
     nop
 __cs_box_float:
+    mfc1 $t8, $f1
+    li $t9, 0x7ff00000
+    and $t8, $t8, $t9
+    beq $t8, $t9, __cs_err_float
     li $a0, 16
     li $v0, 9
     syscall
@@ -305,10 +310,8 @@ __cs_float_mod_half:
     div.d $f10, $f10, $f12
     j __cs_float_mod_reduce
 __cs_float_mod_sign:
-    mtc1 $zero, $f14
-    cvt.d.w $f14, $f14
-    c.lt.d $f0, $f14
-    bc1f __cs_float_mod_positive
+    mfc1 $t2, $f1
+    bgez $t2, __cs_float_mod_positive
     neg.d $f6, $f6
 __cs_float_mod_positive:
     mov.d $f0, $f6
@@ -625,6 +628,9 @@ __cs_err_index:
     j __cs_fail
 __cs_err_overflow:
     la $a0, __cs_msg_overflow
+    j __cs_fail
+__cs_err_float:
+    la $a0, __cs_msg_float
 __cs_fail:
     addiu $sp, $sp, -8
     sw $a0, 0($sp)
