@@ -1,119 +1,108 @@
-# Compiscript - Fases 1 y 2
+# Compiscript — Fases 1, 2 y 3
 
-Compilador académico de Compiscript implementado en Python. La fase 1 realiza
-análisis léxico, sintáctico y semántico. La fase 2 traduce el árbol validado a
-código de tres direcciones (TAC), con cuádruplos, reciclaje de temporales y
-registros de activación. Incluye un intérprete de TAC para verificar resultados.
+Compilador académico de Ihan Marroquin y Diego Patzan. Analiza Compiscript, genera código de tres direcciones (TAC) y lo traduce a ensamblador MIPS32 ejecutable en MARS. Conserva funciones, recursión, ámbitos, closures, clases, herencia, listas y manejo de errores.
 
-El frontend reutiliza los generadores desarrollados en el proyecto anterior:
+## Preparación
 
-- **YALex** lee `grammar/Compiscript.yal`, construye un NFA con Thompson, lo
-  convierte a DFA por subconjuntos y genera el lexer de Python.
-- **YAPar** lee `grammar/Compiscript.yalp`, calcula FIRST/FOLLOW, construye el
-  autómata LR(0) y produce la tabla SLR para el parser shift-reduce.
-- Las reducciones forman el árbol que recibe el analizador semántico.
-
-La gramática oficial entregada por el catedrático se conserva como referencia
-en `grammar/Compiscript.g4`. La implementación no usa Lark ni otro parser ya
-hecho.
-
-## Instalación
-
-Desde PowerShell, dentro del repositorio:
+Requiere Python 3.10 o posterior con Tkinter. Desde la carpeta del repositorio, en PowerShell:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts\preparar_mips.py
 ```
 
-La primera ejecución genera los artefactos del lexer y del parser en
-`generated/`; las siguientes ejecuciones reutilizan esa caché.
+El último comando descarga MARS oficial y comprueba su SHA-256. Si falta Java, prepara un JRE 17 portátil. Las herramientas quedan en `tools/`, fuera de Git. La preparación requiere Internet una vez; después puede ejecutarse sin conexión. Generar `.asm` solamente requiere Python; ejecutarlo requiere Java y MARS.
 
-## Cómo correrlo
-
-Interfaz gráfica recomendada para presentar:
+## Interfaz gráfica
 
 ```powershell
-python scripts/ide.py
+.\.venv\Scripts\python.exe scripts\ide.py
 ```
 
-En el IDE se elige un ejemplo y se presiona **Compilar (F5)**. Se muestran:
+Elegir `fase3_llamadas` y presionar **Compilar (F5)**. Las pestañas **Árbol**, **Símbolos**, **Errores** y **TAC** muestran las etapas previas. **MIPS** muestra el ensamblador y **Memoria** compara los registros abstractos con los marcos físicos MIPS32.
 
-1. el árbol sintáctico;
-2. la tabla de símbolos separada por ámbitos;
-3. los errores y avisos con línea y columna.
-4. el TAC y sus cuádruplos;
-5. los registros de activación y símbolos extendidos.
+**Ejecutar MIPS (F6)** inicia MARS y muestra `720`, `15` y `25` en **Salida MIPS**. **Exportar MIPS** guarda un `.asm` completo, con sus rutinas de apoyo. **Ejecutar TAC** y **Exportar TAC** conservan la fase 2.
 
-**Ejecutar TAC** verifica el resultado y **Exportar TAC** guarda `.tac` o `.json`.
-Para comprobar el funcionamiento, seleccione `fase2_expresiones` y luego
-`fase2_funciones_closures`.
+La simulación se ejecuta en segundo plano con límites de tiempo e instrucciones. Una nueva compilación limpia las salidas anteriores y descarta resultados de simulaciones anteriores pendientes.
 
-También puede usarse la terminal:
+## Terminal
 
 ```powershell
-python scripts/compiscript.py examples/basico.cps --arbol --simbolos
-python scripts/compiscript.py examples/clases_listas.cps --simbolos
-python scripts/compiscript.py examples/errores.cps --simbolos
-python scripts/compiscript.py examples/fase2_expresiones.cps --tac --ejecutar
-python scripts/compiscript.py examples/fase2_funciones_closures.cps --tac --registros --ejecutar
-python scripts/compiscript.py examples/fase2_objetos_listas.cps --tac --simbolos --ejecutar
-python scripts/compiscript.py examples/fase2_control.cps --salida salida.tac
-python scripts/compiscript.py examples/fase2_expresiones.cps --salida salida.json
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\fase3_llamadas.cps --salida-mips programa.asm
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\fase3_llamadas.cps --ejecutar-mips
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\fase3_memoria.cps --ejecutar-mips
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\fase3_control.cps --ejecutar-mips
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\basico.cps --mips --mapa-mips
 ```
 
-Los dos primeros ejemplos deben terminar con `Fase 1 completada
-correctamente`. El tercero devuelve código de salida 1 y demuestra las
-validaciones semánticas.
+`--salida programa.asm` también exporta ensamblador; `.tac` y `.json` conservan la exportación anterior. `--sin-mirilla` desactiva la optimización local. `--tiempo-mips` limita segundos (15 por defecto) y `--limite-mips` instrucciones simuladas (2 000 000 por defecto). Este límite es diferente de `--limite`, que controla instrucciones TAC.
 
-Sin opciones de fase 2, la CLI conserva el comportamiento de la fase 1.
-`--tac`, `--cuadruplos`, `--registros`, `--salida` o `--ejecutar` activan la fase 2.
-El compilador no genera TAC si existen errores de las fases anteriores. Los
-avisos no bloquean la compilación. No se genera assembler ni un ejecutable nativo.
-
-## Pruebas
+Se puede configurar `MARS_JAR` y, opcionalmente, `COMPISCRIPT_JAVA`; también se reconoce Java en PATH. Para ejecutar el archivo exportado directamente:
 
 ```powershell
-python -m pytest -q
+.\tools\jre\bin\java.exe -jar tools\Mars4_5.jar nc me sm programa.asm
 ```
 
-Las pruebas cubren el frontend propio, posiciones de tokens, errores léxicos y
-sintácticos, ámbitos anidados, tipos, funciones, clases, herencia, listas,
-control de flujo, diagnósticos y CLI.
-Además ejecutan el TAC para comprobar precedencia, cortocircuito, efectos
-laterales, saltos, recursión, closures con entornos independientes, métodos,
-herencia, índices, límites de ejecución, IDE y exportación. También regeneran
-el frontend sin depender de la caché. Resultado de la entrega: **107 pruebas**.
+Si se utiliza Java de PATH, reemplazar la ruta del ejecutable por `java`. En la interfaz de MARS, abrir el `.asm`, usar **Run → Assemble** y después **Run → Go**. Se incluyen NOP después de saltos y llamadas y se prueba también delayed branching activado. [Comandos de MARS](https://dpetersanderson.github.io/Help/MarsHelpCommand.html).
 
-## Estructura
+Las fases anteriores siguen disponibles:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\basico.cps --arbol --simbolos
+.\.venv\Scripts\python.exe scripts\compiscript.py examples\fase2_funciones_closures.cps --tac --registros --ejecutar
+```
+
+## Arquitectura
 
 ```text
-grammar/                 gramáticas oficial, YALex y YAPar
-src/yalex/               generador léxico propio
-src/yapar/               generador sintáctico propio
-src/compiscript/parser.py integración y construcción del árbol
-src/compiscript/symbols.py tabla de símbolos y ámbitos
-src/compiscript/semantic.py validaciones semánticas
-src/compiscript/ir.py      cuádruplos y pool de temporales
-src/compiscript/layout.py  direcciones y registros de activación
-src/compiscript/tac.py     Visitor de traducción dirigido por la sintaxis
-src/compiscript/vm.py      intérprete de TAC para verificación
-scripts/compiscript.py    ejecución por terminal
-scripts/ide.py            interfaz gráfica de demostración
-examples/                 casos listos para presentar
-tests/                    pruebas automatizadas
+.cps → YALex/YAPar → árbol → semántica y símbolos → TAC → MIPS → MARS
 ```
 
-## Documentación de la fase 2
+YALex construye un lexer DFA desde `grammar/Compiscript.yal` y YAPar genera las tablas SLR de `grammar/Compiscript.yalp`. Conservamos `Compiscript.g4` como referencia. Continuamos con los generadores propios del proyecto anterior. El backend recibe TAC validado; no ejecuta el programa para fabricar el ensamblador.
 
-La documentación de entrega reúne la arquitectura, el lenguaje intermedio,
-las reglas de traducción, la instalación y las pruebas:
+| Componente | Responsabilidad |
+| --- | --- |
+| `parser.py`, `semantic.py`, `symbols.py` | Árbol, tipos, símbolos y ámbitos |
+| `ir.py`, `layout.py`, `tac.py` | Cuádruplos, memoria abstracta y generación de TAC |
+| `vm.py` | Intérprete TAC utilizado como referencia en las pruebas |
+| `mips_model.py` | Marcos físicos, descriptores, `getReg()` y mirilla |
+| `mips.py` | Traducción de cuádruplos e instrucciones destino |
+| `mips_runtime.asm` | Rutinas MIPS para valores, entornos, objetos y errores |
+| `mips_runner.py` | Ejecución externa en MARS con límites |
+| `pipeline.py` | Coordinación de las fases y diagnósticos |
 
-- [Documentación de la fase 2](docs/fase2.pdf).
+El llamador guarda los argumentos en su marco. La convención interna pasa la closure en `$a0`, la dirección del vector de argumentos en `$a1` y su cantidad en `$a2`; devuelve una referencia en `$v0`. Es una convención propia, diferente de la ABI o32 de C.
 
-Se conserva YALex/YAPar de la fase anterior. El enunciado menciona ANTLR en su
-flujo ilustrativo, pero esta implementación sigue utilizando los generadores
-propios y la gramática oficial como referencia. `Closure` es una anotación
-adicional documentada para funciones que retornan otra función.
+Cada procedimiento reserva un marco alineado a ocho bytes mediante `$sp`, guarda `$ra`, `$fp` y `$s0`–`$s3`, y restaura el estado al retornar. `$fp` permite localizar temporales y argumentos. Cada llamada recursiva dispone de su propio marco. El modelo abstracto de fase 2 usaba palabras de ocho bytes; el backend calcula una distribución física independiente con referencias de cuatro bytes.
 
+`getReg()` utiliza `$t0`–`$t7` y asigna registros libres. Si todos están ocupados, derrama el menos recientemente usado a su hogar en la pila. Los descriptores se vacían antes de etiquetas, saltos y llamadas. `$t8` y `$t9` se reservan para apoyo. La mirilla elimina movimientos propios, cargas consecutivas idénticas y saltos a la etiqueta inmediatamente siguiente.
+
+Los entornos capturados permanecen en el heap. Una closure conserva código, entorno de definición y receptor; una instancia conserva su clase y campos. La búsqueda de métodos comienza en la clase hija y continúa hacia sus padres. Cada operación TAC se convierte en instrucciones o llamadas a rutinas MIPS; no se interpreta una tabla de cuádruplos dentro de MARS.
+
+Los enteros tienen signo y 32 bits, con desbordamientos detectados. Los `float` utilizan precisión double y se rechazan resultados no finitos. La división entera trunca hacia cero y el residuo conserva el signo del dividendo. La notación de salida de punto flotante puede diferir de Python. Las cadenas usan bytes Latin-1 y terminador NUL; caracteres fuera de ese conjunto o NUL internos producen un diagnóstico. El heap dura hasta terminar la simulación; no implementamos recolección de basura MIPS.
+
+`try/catch` conserva el punto de recuperación, la pila y el entorno, incluso para errores originados en una llamada interna. Los errores no capturados muestran línea y columna y terminan con código distinto de cero. Se controlan división entre cero, índices, desbordamiento y profundidad de llamadas (256 activaciones).
+
+La CLI devuelve 0 al completar, 1 ante errores de compilación o ejecución y 2 ante errores de lectura o escritura. Las fases anteriores con errores impiden generar MIPS.
+
+## Pruebas y ejemplos
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+La batería conserva las pruebas anteriores y ejecuta en MARS sus casos de comportamiento. Cubre recursión, más de cuatro parámetros, closures independientes, herencia, listas anidadas, cortocircuito, excepciones, generación inválida, errores del ensamblador, CLI, IDE y límites de simulación. Requiere preparar MARS; si falta, pytest identifica las pruebas dependientes como omitidas. GitHub Actions prepara el simulador antes de probar.
+
+| Ejemplo | Resultado |
+| --- | --- |
+| `fase3_llamadas.cps` | `720`, `15`, `25` |
+| `fase3_memoria.cps` | `11`, `12`, `21`, `24` |
+| `fase3_control.cps` | `8`, `3`, `3.5`, `false`, error de índice capturado y `continuamos` |
+| `fase3_error_generacion.cps` | Diagnóstico de literal fuera del rango MIPS32 |
+| `fase3_error_ejecucion.cps` | Error de división entre cero en MARS |
+
+## Documentación
+
+- [Fase 3](docs/fase3.pdf): arquitectura, llamadas, registros, traducción y ejecución.
+- [Fase 2](docs/fase2.pdf): lenguaje intermedio y diseño anterior.

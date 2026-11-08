@@ -68,7 +68,7 @@ class CompiscriptIDE(tk.Tk):
         self._configure_styles()
         self._build()
         self._bind_shortcuts()
-        self._load_example("basico")
+        self._load_example("fase3_llamadas")
 
     def _monospace_font(self):
         available = set(tkfont.families(self))

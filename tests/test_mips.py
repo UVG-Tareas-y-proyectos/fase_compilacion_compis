@@ -100,3 +100,17 @@ def test_integer_overflow_reports_error_instead_of_silent_wrap(expr):
     result=compile_source('print('+expr+');')
     execution=run_mars(MIPSGenerator(result.tac).generate().text())
     assert not execution.ok and 'desbordamiento' in execution.stdout
+
+
+@pytest.mark.parametrize(('name','expected'),[
+    ('fase3_llamadas',['720','15','25']),
+    ('fase3_memoria',['11','12','21','24']),
+    ('fase3_control',['8','3','3.5','false','índice fuera de rango: 5','continuamos']),
+])
+def test_phase3_demonstrations(name,expected):
+    source=(Path(__file__).resolve().parents[1]/'examples'/f'{name}.cps').read_text(encoding='utf-8')
+    result=compile_source(source)
+    assert result.ok
+    execution=run_mars(MIPSGenerator(result.tac).generate().text())
+    assert execution.ok,execution.stderr
+    assert execution.stdout.splitlines()==expected
