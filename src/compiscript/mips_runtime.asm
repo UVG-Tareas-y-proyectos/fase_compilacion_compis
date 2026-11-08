@@ -222,7 +222,10 @@ __cs_numeric_ready:
     li $t4, -2147483648
     bne $t2, $t4, __cs_int_div_safe
     li $t4, -1
-    beq $t3, $t4, __cs_err_overflow
+    bne $t3, $t4, __cs_int_div_safe
+    beq $a2, 3, __cs_err_overflow
+    move $a0, $zero
+    j __cs_int_box
 __cs_int_div_safe:
     div $t2, $t3
     beq $a2, 3, __cs_int_quotient

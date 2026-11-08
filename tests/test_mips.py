@@ -89,7 +89,7 @@ def test_previous_examples_match_tac_in_mars(name):
     'let xs=[1]; try{print(xs[-1]);}catch(e){print(e);} print(xs[0]);',
     'class A {let x=1; function m():integer{return this.x;}} class B:A {function m():integer{return this.x+2;}} let b=new B(); print(b.m()); print(b);',
     'function f():integer{return 1;} print(f); print(10000000000.0%3.0);',
-    'print(-0.0%2.0); print(-9.5%2.0);',
+    'print(-0.0%2.0); print(-9.5%2.0); let minimo=-2147483647-1; print(minimo%-1);',
 ])
 def test_advanced_values_exceptions_and_capture(source):
     compare(source,delayed=True)
